@@ -1,0 +1,152 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Captions</title>
+<style>
+  /* A phone held in a dark room, at a wedding. Dark, low glare, large type,
+     nothing that blinks. Follows the phone's own theme rather than the
+     projector's, because the guest is looking at their hand, not the wall. */
+  :root {
+    --bg:#000; --fg:#fff; --dim:#8a8a8a; --line:#1c1c1c; --accent:#c9a227;
+    --chip:#141414; --chip-on:#c9a227; --chip-fg:#c8c8c8; --chip-on-fg:#000;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#fff; --fg:#111; --dim:#6b6b6b; --line:#e6e6e6; --accent:#8a6a10;
+      --chip:#f0f0f0; --chip-on:#8a6a10; --chip-fg:#333; --chip-on-fg:#fff;
+    }
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body {
+    margin:0; min-height:100%; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;
+    font-size:26px; line-height:1.35;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right)
+            env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  header {
+    position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line);
+    display:flex; gap:.4em; align-items:center; padding:.55em .7em; z-index:2;
+  }
+  .chip {
+    flex:1 1 0; text-align:center; padding:.42em .2em; border-radius:999px;
+    background:var(--chip); color:var(--chip-fg); font-size:.62em; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase; cursor:pointer;
+    border:none; font-family:inherit;
+  }
+  .chip[aria-pressed="true"] { background:var(--chip-on); color:var(--chip-on-fg); }
+  #dot { flex:none; width:.5em; height:.5em; border-radius:50%; background:var(--dim); }
+  #dot.live { background:#2e9e4f; } #dot.warn { background:#c8801e; }
+
+  main { padding:.8em .7em 3em; }
+  .line { margin:0 0 .75em; font-weight:600; overflow-wrap:break-word;
+          transition:opacity .3s; }
+  .line.interim { opacity:.55; font-weight:500; }
+  .line.old  { opacity:.42; }
+  .line.older{ opacity:.2; }
+
+  /* Nothing is being said, or the operator has muted. Deliberately plain: a
+     guest should never be left wondering whether their phone broke. */
+  #idle { color:var(--dim); font-size:.62em; letter-spacing:.05em; padding:.5em 0; }
+  #idle.hide { display:none; }
+</style>
+
+<header>
+  <span id="dot"></span>
+  <!-- Each chip declares its OWN language. Without that, selecting Türkçe puts
+       lang="tr" in scope and CSS uppercasing follows Turkish casing rules, so
+       "English" renders as "ENGLİSH" with a dotted capital I. -->
+  <button class="chip" data-lang="es" lang="es">Español</button>
+  <button class="chip" data-lang="en" lang="en">English</button>
+  <button class="chip" data-lang="tr" lang="tr">Türkçe</button>
+</header>
+<main>
+  <div id="idle">waiting for the next words…</div>
+  <div id="lines"></div>
+</main>
+
+<script>
+// Read-only. This page connects to /ws/guest, which never reads what we send,
+// so there is deliberately no way to mute or change anything from here.
+const CH2LANG = { EN:'en', TR:'tr', ES:'es' };
+const MAXLINES = 6;
+const linesEl = document.getElementById('lines');
+const idleEl  = document.getElementById('idle');
+const dot     = document.getElementById('dot');
+
+let lang = 'en', current = null, muted = false;
+try { lang = localStorage.getItem('guestlang') || navigator.language.slice(0,2); } catch (_) {}
+if (!['es','en','tr'].includes(lang)) lang = 'en';
+
+function paintChips() {
+  document.querySelectorAll('.chip').forEach(c =>
+    c.setAttribute('aria-pressed', String(c.dataset.lang === lang)));
+  // Only the captions take the selected language, never the whole document --
+  // the chips are each labelled in their own, and casing rules are per-element.
+  linesEl.lang = lang;
+}
+document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+  lang = c.dataset.lang;
+  try { localStorage.setItem('guestlang', lang); } catch (_) {}
+  paintChips();
+  // Switching language does not replay history — start clean rather than show
+  // a column of text in the language they just turned off.
+  linesEl.textContent = ''; current = null; showIdle();
+}));
+paintChips();
+
+function showIdle() {
+  idleEl.classList.toggle('hide', linesEl.childElementCount > 0);
+  idleEl.textContent = muted ? '—' : 'waiting for the next words…';
+}
+
+function age() {
+  const kids = [...linesEl.children];
+  kids.slice(0, -MAXLINES).forEach(n => n.remove());
+  [...linesEl.children].reverse().forEach((n, i) => {
+    n.classList.remove('old','older');
+    if (i === 1) n.classList.add('old');
+    if (i >= 2)  n.classList.add('older');
+  });
+}
+
+function render(text, final) {
+  if (!text) return;
+  if (!current) {
+    current = document.createElement('div');
+    current.className = 'line interim';
+    linesEl.appendChild(current);
+  }
+  current.textContent = text;
+  current.classList.toggle('interim', !final);
+  if (final) current = null;
+  age();
+  showIdle();
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws/guest`);
+  ws.onopen  = () => { dot.className = 'live'; };
+  ws.onclose = () => { dot.className = 'warn'; setTimeout(connect, 1500); };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'status') {
+      muted = !!m.muted;
+      if (muted) { linesEl.textContent = ''; current = null; }
+      showIdle();
+    }
+    else if (m.type === 'clear') {
+      linesEl.textContent = ''; current = null; showIdle();
+    }
+    else if (m.type === 'caption') {
+      const src = CH2LANG[m.ch];
+      // The speaker's own language shows the words as heard; every other
+      // language shows the translation, when it arrives.
+      const text = (src === lang) ? m.source : (m.translations || {})[lang];
+      render(text, m.final);
+    }
+  };
+}
+connect();
+</script>

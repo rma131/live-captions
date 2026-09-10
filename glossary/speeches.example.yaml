@@ -1,0 +1,25 @@
+# Pre-translated lines.  ---- EXAMPLE, copy to speeches.yaml ----
+#
+# When a finished sentence is ~78% similar to `said`, the screen shows these
+# human translations instead of the machine's. Unmatched speech falls through to
+# live translation, so a speaker going off-script loses nothing.
+#
+# ONE SENTENCE PER ROW. Matching is per-sentence; a paragraph never matches.
+#
+# Generate this from a Notion table or CSV with scripts/import_speeches.py, and
+# see glossary/IMPORT-PROMPT.md for turning a speech document into those rows.
+
+lines:
+  - lang: en
+    said: "Today we celebrate the marriage of Firstname and Othername."
+    en: "Today we celebrate the marriage of Firstname and Othername."
+    es: "Hoy celebramos el matrimonio de Firstname y Othername."
+    tr: "Bugün Firstname ve Othername'in evliliğini kutluyoruz."
+
+  # Turkish has no grammatical gender, so live translation must GUESS "he" or
+  # "she". A prepared line never guesses. This is the main reason to write them.
+  - lang: tr
+    said: "Onu çok seviyorum."
+    tr: "Onu çok seviyorum."
+    en: "I love her very much."
+    es: "La quiero muchísimo."

@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest something this should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project deliberately stays small, and several things are out of scope
+        on purpose — automatic language detection, diarization, text-to-speech and
+        a local router among them. The README explains why. A proposal that
+        revisits one of those is welcome, but please argue the case.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What goes wrong today
+      description: Describe the situation at an actual event, not the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like instead
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Would this run during a live event?
+      options:
+        - "Yes — it runs while people are speaking"
+        - "No — it is preparation or review, before or after"
+    validations:
+      required: true

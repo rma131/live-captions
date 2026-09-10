@@ -1,0 +1,59 @@
+name: Bug report
+description: Something behaved differently from how it is documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you write anything: do not attach a transcript, a recording, or a
+        filled-in glossary.** Those contain everything people said at somebody's
+        event, including their names. Paste the handful of lines that show the
+        problem, with names replaced.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: audio
+    attributes:
+      label: Audio setup
+      description: |
+        Most problems here are audio routing, not code. This section usually
+        contains the answer.
+      value: |
+        Interface (make and model):
+        AUDIO_DEVICE_MATCH:
+        CH1_USB / CH2_USB / CH3_USB:
+        Microphones:
+        Verified the channel map by tapping each capsule with `scripts/meters.py`:  yes / no
+    validations:
+      required: true
+
+  - type: textarea
+    id: levels
+    attributes:
+      label: The gate line
+      description: |
+        Copy one `gate -> ...` line from the terminal, or the readout shown by
+        `[` / `]` on the display page. This shows the threshold and all three
+        channel levels at once.
+      placeholder: "gate -> ES   (ES:0.0207 EN:0.0065 TR:0.0081)   threshold 0.010"
+      render: text
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS, Python version, and how you are running it
+      placeholder: "Arch Linux, Python 3.11, uv run python captions.py"
+
+  - type: checkboxes
+    id: replay
+    attributes:
+      label: Narrowing it down
+      options:
+        - label: It also happens with `scripts/replay.py` on a recorded fixture, so it is not live-audio-specific
+        - label: It only happens with live microphones

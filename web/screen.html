@@ -1,0 +1,397 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wedding captions</title>
+<style>
+  /* Dark by default; body.light is the bright-room variant. Every colour is a
+     variable so the two themes stay in step. */
+  :root {
+    --fs: 44px;
+    --bg:#000; --fg:#fff; --accent:#c9a227;
+    --label:#565656; --rule:#1e1e1e; --border:#191919;
+    --bar:#3d3d3d; --bar-strong:#7a7a7a;
+    --draft:#9a9a9a; --pending:#2e2e2e;
+    --panel:#0b0b0b; --panel-line:#222; --panel-fg:#8a8a8a;
+    --help-bg:rgba(0,0,0,.93); --help-fg:#c8c8c8; --kbd-bg:#141414; --kbd-line:#3a3a3a;
+    --muted-fg:#6e1212;
+  }
+  body.light {
+    --bg:#fff; --fg:#111; --accent:#8a6a10;
+    --label:#787878; --rule:#e4e4e4; --border:#ececec;
+    --bar:#a8a8a8; --bar-strong:#666;
+    --draft:#6e6e6e; --pending:#d2d2d2;
+    --panel:#f6f6f6; --panel-line:#dcdcdc; --panel-fg:#555;
+    --help-bg:rgba(255,255,255,.95); --help-fg:#333; --kbd-bg:#fff; --kbd-line:#bbb;
+    --muted-fg:#8f1a1a;
+  }
+  html, body {
+    margin:0; height:100%; overflow:hidden;
+    background:var(--bg); color:var(--fg);
+    cursor:none; font-family:-apple-system,system-ui,"Helvetica Neue",sans-serif;
+  }
+
+  /* Three fixed columns, always in the same order: Español | English | Türkçe.
+     A guest learns where their language is once and never looks anywhere else.
+     Nothing here may change width or position when the speaker changes. */
+  #cols { display:flex; height:100%; }
+  .col { flex:1 1 0; width:33.333%; min-width:0;
+         display:flex; flex-direction:column;
+         padding:3vh 2.2vw 5vh; box-sizing:border-box; }
+  .col + .col { border-left:1px solid var(--border); }
+
+  .head { flex:none; margin-bottom:1em; }
+  .lang { font-size:calc(var(--fs)*0.4); font-weight:700; letter-spacing:.16em;
+          text-transform:uppercase; color:var(--label); transition:color .3s; }
+  /* The speaking column is marked by colour and a rule, never by size or
+     position — the layout must not move when the speaker changes. */
+  .rule { height:3px; margin-top:.45em; background:var(--rule); transition:background .3s; }
+  .col.active .lang { color:var(--accent); }
+  .col.active .rule { background:var(--accent); }
+  .now { font-size:calc(var(--fs)*0.3); letter-spacing:.18em; text-transform:uppercase;
+         color:var(--accent); margin-top:.5em; height:1.2em; visibility:hidden; }
+  .col.active .now { visibility:visible; }
+
+  /* Lines stack from the bottom. overflow:hidden is load-bearing, not tidiness:
+     without it a column of three long sentences overflows UPWARD out of the flex
+     box and paints straight over the language label, which is the one thing on
+     screen a guest navigates by. Clipping the oldest line is the right trade —
+     it is already down at opacity .24 and on its way out. */
+  .body { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column;
+          justify-content:flex-end;
+          /* Fade the clip instead of slicing glyphs in half. The oldest line
+             leaves the screen the same way it fades: gradually. */
+          -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.4em);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 1.4em); }
+  .line { font-size:var(--fs); font-weight:600; line-height:1.3; margin:0 0 .5em;
+          overflow-wrap:break-word; transition:opacity .35s; }
+  .line.age1 { opacity:.5 } .line.age2 { opacity:.24 }
+  .line.interim { opacity:.55 }
+  .line.interim.age1 { opacity:.3 }
+  /* A column waiting for its translation reserves the line straight away, so
+     older captions scroll up the moment someone starts talking. Without this the
+     translation lands abruptly at the end and reads as part of the previous
+     sentence. */
+  .line.pending::after { content:"···"; color:var(--pending); letter-spacing:.1em; }
+  /* A machine draft, standing in until the human interpreter reaches this
+     language. Visibly provisional so nobody mistakes it for the interpretation. */
+  .line.draft { font-style:italic; color:var(--draft); }
+
+  /* Step number in a round: 1 is the speech itself, 2 and 3 the interpreters,
+     in the order they will speak. */
+  .step { font-size:calc(var(--fs)*0.28); letter-spacing:.16em; color:#4a4a4a;
+          margin-top:.5em; height:1.3em; }
+  .col.speaker .step { color:var(--accent); }
+
+  #bar { position:fixed; left:0; right:0; bottom:0; display:flex; gap:1.5em;
+         padding:.45em 1.2em; font-size:14px; color:var(--bar); letter-spacing:.05em; }
+  #bar b { font-weight:600; color:var(--bar-strong); }
+  .warn { color:#c8801e !important; }
+  .live { color:#2f8f4a !important; }
+
+  /* Mute takes the theme's own background, and the monogram is swapped to the
+     matching artwork. A black rectangle in a bright room defeats light mode. */
+  #muted { position:fixed; inset:0; display:none; align-items:center;
+           justify-content:center; background:var(--bg); }
+  #muted img { width:min(46vw, 52vh); height:auto; opacity:.92; }
+  #muted span { color:var(--muted-fg); font-size:calc(var(--fs)*1.2);
+                font-weight:700; letter-spacing:.3em; }
+  body.muted #muted { display:flex; }
+
+  /* Live gate readout, shown only while tuning. The three numbers are what you
+     set the threshold against: it must sit above the room and below a voice. */
+  #gate { position:fixed; top:0; right:0; padding:.6em 1em; background:var(--panel);
+          border:1px solid var(--panel-line); font-size:15px; color:var(--panel-fg); display:none;
+          font-variant-numeric:tabular-nums; }
+  #gate.show { display:block; }
+  #gate .hot { color:var(--accent); }
+
+  #help { position:fixed; inset:0; display:none; align-items:center;
+          justify-content:center; background:var(--help-bg); }
+  body.help #help { display:flex; }
+  #help table { border-collapse:collapse; font-size:19px; color:var(--help-fg); }
+  #help td { padding:.42em 1.4em .42em 0; }
+  #help kbd { display:inline-block; min-width:1.5em; text-align:center;
+              padding:.16em .5em; border:1px solid var(--kbd-line); border-radius:4px;
+              background:var(--kbd-bg); color:var(--fg); font:600 17px ui-monospace,monospace; }
+  #help h2 { color:#6a6a6a; font-size:14px; letter-spacing:.2em;
+             text-transform:uppercase; font-weight:600; margin:1.4em 0 .6em; }
+  #help h2:first-child { margin-top:0; }
+</style>
+
+<div id="cols">
+  <div class="col" data-lang="es">
+    <div class="head"><div class="lang">Español</div><div class="rule"></div>
+      <div class="now">hablando</div><div class="step"></div></div>
+    <div class="body"></div>
+  </div>
+  <div class="col" data-lang="en">
+    <div class="head"><div class="lang">English</div><div class="rule"></div>
+      <div class="now">speaking</div><div class="step"></div></div>
+    <div class="body"></div>
+  </div>
+  <div class="col" data-lang="tr">
+    <div class="head"><div class="lang">Türkçe</div><div class="rule"></div>
+      <div class="now">konuşuyor</div><div class="step"></div></div>
+    <div class="body"></div>
+  </div>
+</div>
+
+<!-- Optional monogram; the variant follows the theme and the word MUTED stands
+     in when neither file is present. -->
+<div id="muted">
+  <img alt="" hidden>
+  <span hidden>MUTED</span>
+</div>
+
+<div id="gate"></div>
+
+<div id="help">
+  <div>
+    <h2>Captions</h2>
+    <table>
+      <tr><td><kbd>M</kbd></td><td>mute — clears the screen instantly</td></tr>
+      <tr><td><kbd>C</kbd></td><td>clear captions</td></tr>
+      <tr><td><kbd>+</kbd> <kbd>−</kbd></td><td>font size</td></tr>
+      <tr><td><kbd>L</kbd></td><td>light / dark screen</td></tr>
+    </table>
+    <h2>Interpretation round</h2>
+    <table>
+      <tr><td><kbd>1</kbd></td><td>Spanish is speaking &middot; interpreted EN then TR</td></tr>
+      <tr><td><kbd>2</kbd></td><td>English is speaking &middot; interpreted TR then ES</td></tr>
+      <tr><td><kbd>3</kbd></td><td>Turkish is speaking &middot; interpreted EN then ES</td></tr>
+      <tr><td><kbd>0</kbd></td><td>free for all &middot; translate every channel</td></tr>
+    </table>
+    <h2>Microphones</h2>
+    <table>
+      <tr><td><kbd>[</kbd></td><td>gate down &middot; picks up a quieter speaker</td></tr>
+      <tr><td><kbd>]</kbd></td><td>gate up &middot; rejects more bleed</td></tr>
+      <tr><td><kbd>R</kbd></td><td>reconnect all speech sessions</td></tr>
+    </table>
+    <h2></h2>
+    <table>
+      <tr><td><kbd>?</kbd></td><td>close this</td></tr>
+    </table>
+  </div>
+</div>
+
+<div id="bar">
+  <span id="conn">connecting…</span>
+  <span>mic <b id="active">—</b></span>
+  <span id="ovr" hidden>override <b id="ovrch"></b></span>
+  <span id="sess">EN · TR · ES</span>
+</div>
+
+<script>
+let MAXLINES = 3;          // more scrollback in a round, so interpreters can
+                           // still read what was said before their turn
+const CH2LANG = { EN:'en', TR:'tr', ES:'es' };
+const COL = {};                       // lang -> {col, body}
+document.querySelectorAll('.col').forEach(c => {
+  COL[c.dataset.lang] = { col: c, body: c.querySelector('.body') };
+});
+
+let ws, fontSize = 44, current = null, themeChosen = false;   // current = the interim line in each column
+const sessions = { EN:'up', TR:'up', ES:'up' };
+
+// Per-session health in the corner. Captions stay on screen throughout: a
+// reconnecting session must never blank what the room is already reading.
+function renderSessions() {
+  const el = document.getElementById('sess');
+  el.innerHTML = ['EN','TR','ES'].map(ch => {
+    const st = sessions[ch] || 'up';
+    const colour = st === 'up' ? '#7a7a7a' : (st === 'retrying' ? '#c8801e' : '#a33');
+    const mark = st === 'up' ? '·' : (st === 'retrying' ? '↻' : '×');
+    return `<span style="color:${colour}">${ch}${mark}</span>`;
+  }).join(' ');
+}
+
+const mutedImg = document.querySelector('#muted img');
+const mutedWord = document.querySelector('#muted span');
+// Hidden rather than removed on error, so switching theme can try the other
+// artwork instead of being stuck on the word.
+mutedImg.addEventListener('load',  () => { mutedImg.hidden = false; mutedWord.hidden = true; });
+mutedImg.addEventListener('error', () => { mutedImg.hidden = true;  mutedWord.hidden = false; });
+
+function setTheme(light, save) {
+  document.body.classList.toggle('light', light);
+  mutedImg.src = light ? '/fc-white.svg' : '/fc-dark.svg';
+  if (save) { try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (_) {} }
+}
+
+function setFont(px) {
+  fontSize = Math.max(18, Math.min(120, px));
+  document.documentElement.style.setProperty('--fs', fontSize + 'px');
+}
+
+function reflow(body) {
+  [...body.children].slice(0, -MAXLINES).forEach(n => n.remove());
+  [...body.children].reverse().forEach((n, i) => {
+    n.classList.remove('age1', 'age2');
+    if (i === 1) n.classList.add('age1');
+    if (i >= 2)  n.classList.add('age2');
+  });
+}
+
+// A round pins the speaking order onto the column headers and keeps more
+// history on screen, because the interpreters are reading it to do their job.
+function applyRound(order) {
+  MAXLINES = order.length ? 5 : 3;
+  document.querySelectorAll('.col').forEach(c => {
+    const ch = c.dataset.lang.toUpperCase();
+    const i = order.indexOf(ch);
+    c.querySelector('.step').textContent =
+      i < 0 ? '' : (i === 0 ? '1 · speech' : `${i + 1} · interpreter`);
+    c.classList.toggle('speaker', i === 0);
+  });
+  Object.values(COL).forEach(v => reflow(v.body));
+}
+
+function markActive(lang) {
+  Object.entries(COL).forEach(([k, v]) => v.col.classList.toggle('active', k === lang));
+}
+
+// One utterance fills all three columns: the spoken language gets the words the
+// microphone actually heard, the other two get their translation.
+function render(texts, final, srcLang) {
+  if (!current) current = {};
+  // Every column gets its line as soon as the utterance starts, even the ones
+  // whose translation has not arrived. That way the older captions scroll up
+  // once, at the beginning, instead of jumping when the translation lands.
+  for (const lang of ['es', 'en', 'tr']) {
+    const slot = COL[lang]; if (!slot) continue;
+    const text = texts[lang];
+    let el = current[lang];
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'line interim';
+      slot.body.appendChild(el);
+      current[lang] = el;
+    }
+    el.textContent = text || '';
+    el.classList.toggle('pending', !text);
+    el.classList.toggle('interim', !final);
+    // Anything that is not the speaker's own words is a machine draft.
+    el.classList.toggle('draft', !!text && lang !== srcLang);
+    reflow(slot.body);
+  }
+}
+
+// The interpreter's own column: overwrite the draft that is sitting there, or
+// start a new line if the draft has already scrolled away.
+function replaceColumn(lang, text, final) {
+  const slot = COL[lang]; if (!slot) return;
+  if (!current) current = {};
+  let el = current[lang];
+  if (!el) {
+    el = slot.body.lastElementChild;
+    if (!el || !el.classList.contains('draft')) {
+      el = document.createElement('div');
+      el.className = 'line';
+      slot.body.appendChild(el);
+    }
+    current[lang] = el;
+  }
+  el.textContent = text;
+  el.classList.remove('draft', 'pending');
+  el.classList.toggle('interim', !final);
+  reflow(slot.body);
+  if (final) current = null;
+}
+
+function clearAll() {
+  Object.values(COL).forEach(v => { v.body.textContent = ''; });
+  markActive(null);
+  current = null;
+}
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  const conn = document.getElementById('conn');
+
+  ws.onopen  = () => { conn.textContent = 'connected'; conn.className = 'live'; };
+  ws.onclose = () => {
+    conn.textContent = 'reconnecting…'; conn.className = 'warn';
+    setTimeout(connect, 1000);          // captions stay on screen meanwhile
+  };
+
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'status') {
+      document.body.classList.toggle('muted', m.muted);
+      document.getElementById('active').textContent = m.active || '—';
+      document.getElementById('ovr').hidden = !m.override;
+      document.getElementById('ovrch').textContent = m.override || '';
+      applyRound(m.order || []);
+      if (m.font_size) setFont(m.font_size);
+      // .env sets the default; a local choice, once made, wins on this screen.
+      if (m.theme !== undefined && !themeChosen) setTheme(m.theme === 'light', false);
+      showGate(m);
+    }
+    else if (m.type === 'clear') clearAll();
+    else if (m.type === 'session') {
+      sessions[m.ch] = m.state;
+      renderSessions();
+    }
+    else if (m.type === 'caption') {
+      const src = CH2LANG[m.ch];
+      markActive(src);
+      if (m.interpreted) {
+        // A human interpretation replaces the machine draft in its own column
+        // and touches nothing else. It is not re-translated anywhere.
+        replaceColumn(src, m.source, m.final);
+      } else {
+        render({ ...m.translations, [src]: m.source }, m.final, src);
+      }
+      if (m.final) current = null;
+    }
+  };
+}
+
+const send = o => { try { ws.send(JSON.stringify(o)); } catch (_) {} };
+
+// The gate readout appears only when you touch it, then fades. It is an
+// operator tool and has no business on a projector the rest of the evening.
+let gateTimer = null, gateEl = document.getElementById('gate');
+function showGate(m, force) {
+  if (m.threshold === undefined) return;
+  const lv = m.levels || {};
+  gateEl.innerHTML = 'gate ' + m.threshold.toFixed(4) + '   ' +
+    ['ES','EN','TR'].map(ch => {
+      const v = lv[ch] || 0;
+      return `<span class="${v >= m.threshold ? 'hot' : ''}">${ch} ${v.toFixed(4)}</span>`;
+    }).join('  ');
+  if (!force && !gateEl.classList.contains('show')) return;
+  gateEl.classList.add('show');
+  clearTimeout(gateTimer);
+  gateTimer = setTimeout(() => gateEl.classList.remove('show'), 6000);
+}
+
+addEventListener('keydown', e => {
+  switch (e.key) {
+    case 'm': case 'M': send({ type:'mute', toggle:true }); break;
+    case 'c': case 'C': send({ type:'clear' }); break;
+    case '1': case '2': case '3': send({ type:'primary', ch:+e.key }); break;
+    case '0': send({ type:'primary', ch:0 }); break;
+    case '+': case '=': setFont(fontSize + 3); break;
+    case '-': case '_': setFont(fontSize - 3); break;
+    case 'r': case 'R': send({ type:'reconnect' }); break;
+    case '[': send({ type:'gate', up:false }); gateEl.classList.add('show'); break;
+    case ']': send({ type:'gate', up:true });  gateEl.classList.add('show'); break;
+    case 'l': case 'L':
+      themeChosen = true;
+      setTheme(!document.body.classList.contains('light'), true);
+      break;
+    case '?': case '/': document.body.classList.toggle('help'); break;
+    case 'Escape': document.body.classList.remove('help'); break;
+  }
+});
+
+// If there is no logo, say it in words instead.
+{
+  const img = document.querySelector('#muted img');
+  const word = document.querySelector('#muted span');
+  img.addEventListener('error', () => { word.hidden = false; });
+  if (!img.getAttribute('src')) word.hidden = false;
+}
+
+connect();
+</script>

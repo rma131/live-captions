@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Multichannel capture probe</title>
+<style>
+  body { font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; margin:2rem;
+         background:#0e0e0e; color:#ddd; max-width:60rem; }
+  h1 { font-size:1.1rem; letter-spacing:.04em; }
+  button { font:inherit; padding:.5em 1em; background:#1d1d1d; color:#eee;
+           border:1px solid #444; border-radius:4px; cursor:pointer; }
+  table { border-collapse:collapse; margin:1rem 0; width:100%; }
+  th, td { text-align:left; padding:.35em .8em .35em 0; border-bottom:1px solid #222;
+           vertical-align:top; }
+  .ok { color:#5cba6a; } .bad { color:#e06c5f; } .warn { color:#d8a13a; }
+  .verdict { margin:1.5rem 0; padding:1rem; border:1px solid #333; border-radius:6px; }
+  .meter { display:inline-block; height:.7em; background:#3a7; vertical-align:middle; }
+  small { color:#888; }
+</style>
+
+<h1>Can a browser capture more than two channels?</h1>
+<p><small>
+  The captioning pipeline needs three discrete microphone channels, each with a
+  fixed source language. This asks the browser for as many as the interface will
+  give and reports what actually arrives — <em>getUserMedia</em> is free to hand
+  back a downmix without saying so, which is the answer that matters.
+</small></p>
+
+<p><button id="go">Ask for microphone access and probe</button></p>
+<div id="out"></div>
+
+<script>
+const out = document.getElementById('out');
+const say = html => { out.insertAdjacentHTML('beforeend', html); };
+
+document.getElementById('go').onclick = async () => {
+  out.textContent = '';
+
+  // Permission first: labels and channel counts stay hidden until it is granted.
+  let probeStream;
+  try {
+    probeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    say(`<p class="bad">microphone refused: ${e.name} — ${e.message}</p>`);
+    return;
+  }
+  probeStream.getTracks().forEach(t => t.stop());
+
+  const devices = (await navigator.mediaDevices.enumerateDevices())
+                    .filter(d => d.kind === 'audioinput');
+  say('<h2>Input devices</h2><table><tr><th>label</th><th>deviceId</th></tr>' +
+      devices.map(d => `<tr><td>${d.label || '(no label)'}</td>` +
+                       `<td><small>${d.deviceId.slice(0,24)}…</small></td></tr>`).join('') +
+      '</table>');
+
+  say('<h2>Channel probe</h2><table><tr><th>device</th><th>asked</th>' +
+      '<th>settings say</th><th>WebAudio really gives</th><th>independent?</th></tr>');
+
+  for (const d of devices) {
+    let stream;
+    try {
+      // Ask for far more than anything real provides. Browsers clamp silently.
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: d.deviceId },
+          channelCount: { ideal: 12 },
+          echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+        }
+      });
+    } catch (e) {
+      say(`<tr><td>${d.label}</td><td>12</td><td colspan="3" class="bad">${e.name}</td></tr>`);
+      continue;
+    }
+
+    const track = stream.getAudioTracks()[0];
+    const claimed = track.getSettings().channelCount ?? '(not reported)';
+
+    // The settings object is a claim. The graph is the evidence.
+    const ctx = new AudioContext();
+    const src = ctx.createMediaStreamSource(stream);
+    const real = src.channelCount;
+
+    // Split and measure each channel for a moment. If a device is handing back
+    // a duplicated mono stream, every channel carries an identical signal.
+    const splitter = ctx.createChannelSplitter(real);
+    src.connect(splitter);
+    const analysers = [];
+    for (let i = 0; i < real; i++) {
+      const a = ctx.createAnalyser();
+      a.fftSize = 2048;
+      splitter.connect(a, i);
+      analysers.push(a);
+    }
+    await new Promise(r => setTimeout(r, 900));
+
+    const rms = analysers.map(a => {
+      const buf = new Float32Array(a.fftSize);
+      a.getFloatTimeDomainData(buf);
+      return Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length);
+    });
+    const distinct = new Set(rms.map(v => v.toFixed(6))).size;
+    const verdict = real < 3
+      ? '<span class="bad">no — fewer than 3</span>'
+      : (distinct > 1 ? '<span class="ok">yes, channels differ</span>'
+                      : '<span class="warn">unproven — all channels identical (silence?)</span>');
+
+    say(`<tr><td>${d.label}</td><td>12</td><td>${claimed}</td>` +
+        `<td class="${real >= 3 ? 'ok' : 'bad'}">${real}</td><td>${verdict}</td></tr>`);
+    if (real >= 2) {
+      say(`<tr><td colspan="5"><small>levels: ` + rms.map((v, i) =>
+          `${i + 1}:${v.toFixed(5)}`).join('  ') + '</small></td></tr>');
+    }
+
+    stream.getTracks().forEach(t => t.stop());
+    ctx.close();
+  }
+
+  say('</table><div class="verdict"><strong>How to read this.</strong> ' +
+      '"WebAudio really gives" is the number that decides it. Three or more, with ' +
+      'channels that differ while people are talking into separate microphones, ' +
+      'means a browser-only version is possible. Two, on an interface the operating ' +
+      'system reports as twelve, means the browser is downmixing and the capture ' +
+      'has to stay in the local Python agent.</div>');
+};
+</script>

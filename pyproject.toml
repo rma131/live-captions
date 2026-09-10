@@ -1,0 +1,15 @@
+[project]
+name = "wedding-captions"
+version = "0.1.0"
+description = "Live trilingual captions for one wedding. Three-day lifespan."
+requires-python = ">=3.11"
+dependencies = [
+    "azure-cognitiveservices-speech",
+    "sounddevice",
+    "numpy",
+    "fastapi",
+    "uvicorn",
+    "python-dotenv",
+    "pyyaml",
+    "websockets>=17.1",
+]

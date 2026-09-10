@@ -1,0 +1,40 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+fixtures/*.wav
+transcripts/
+
+# Wedding content — real names, speeches and recordings stay local.
+# Copy the .example files and fill them in; they are never committed.
+glossary/names.yaml
+glossary/speeches.yaml
+glossary/csv/
+glossary/*.pdf
+glossary/*.docx
+.DS_Store
+# macOS AppleDouble sidecars. A copy from a Mac onto a non-HFS volume writes a
+# ._<name> file beside every single file, including inside .git/objects/pack/,
+# where they make every git command fail with "non-monotonic index".
+._*
+.AppleDouble
+
+web/fc-white.svg
+web/fc-dark.svg
+*.swp
+
+# Notion exports of the speeches — every .md except the ones we deliberately ship
+glossary/*.md
+!glossary/IMPORT-PROMPT.md
+glossary/*Speeches*/
+# Notion "ExportBlock" archives. These hold the full text of real speeches.
+*ExportBlock*.zip
+*.zip
+
+# L-8 event recordings — gigabytes of audio, and the whole wedding
+2609*/
+*.WAV
+recordings/
+# Review and private notes
+POST-EVENT-REVIEW.md
+RECORDINGS.md

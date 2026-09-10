@@ -1,0 +1,68 @@
+# Phrase list for recognition biasing.  ---- EXAMPLE, copy to names.yaml ----
+#
+# HOW THIS IS USED: every phrase below is flattened into one list and attached to
+# ALL THREE recognizers. It is not split by language — a name spoken inside a
+# sentence in another language needs to be in THAT recognizer.
+#
+# RULES
+# 1. Spell it how it is SAID, not how it is officially written.
+# 2. Variants are separate lines. They cost nothing and catch different cases.
+# 3. Azure takes plain strings only — no weights. Categories are for you.
+# 4. KEEP IT AROUND 60-130. A phrase list is a bias, not a dictionary.
+# 5. Do NOT add short names that collide with common words. A real session here
+#    showed "Su" (Turkish for water), "Ayla" (~allá) and "Sara" (~para, sana)
+#    never once recognised correctly while actively biasing ordinary words.
+
+couple:
+  - Firstname
+  - Nickname
+  - Surname
+
+family:
+  - Relative
+  - Relative Middlename
+
+# Each recogniser only ever hears its own language, so every place needs all
+# three forms. This is the most commonly missed thing in the whole file.
+places:
+  - Turkey
+  - Türkiye
+  - Turquía
+  - Ecuador
+  - Ekvador
+  - Canada
+  - Canadá
+  - Kanada
+
+turkish_kinship: [anne, baba, anneanne, babaanne, dede, abla, abi, teyze, hala,
+                  dayı, amca, ağabey, kuzen, yenge, enişte]
+turkish_wedding: [gelin, damat, düğün, nikah, kına gecesi]
+spanish_kinship: [abuela, abuelita, abuelo, abuelito, tía, tío, prima, primo,
+                  suegra, suegro, ñaña, ñaño]
+spanish_wedding: [novia, novio, boda, brindis, madrina, padrino]
+
+# Whatever the family actually talks about. Ours was football.
+interests:
+  - Beşiktaş
+  - Fenerbahçe
+  - Şampiyonlar Ligi
+
+inside:
+  # pets, running jokes, how they met
+
+# ---------------------------------------------------------------- corrections
+# Applied to OUTPUT, after recognition and translation, before display.
+#
+# The phrase list biases what Azure HEARS. It cannot fix what Azure WRITES when
+# it hears correctly but spells conventionally, or when a speaker's accent
+# genuinely produces another sound. Those need substitution, not bias.
+#
+# Turkish case endings are handled automatically: a rule for "Marysol" also
+# fixes "Marysolyı" and "Marysol'nın", keeping the suffix.
+#
+# WARNING: only list things that are ALWAYS wrong. This rewrites text
+# unconditionally, so a left-hand side that is also a real word will corrupt
+# correct sentences.
+corrections:
+  Misspelling: Correct
+  Othermisspelling: Correct
