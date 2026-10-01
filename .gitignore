@@ -38,3 +38,9 @@ recordings/
 # Review and private notes
 POST-EVENT-REVIEW.md
 RECORDINGS.md
+
+# Plan-mode drafts. Private by default: they hold business material (pricing,
+# client notes) that must never reach this public repo. An approved plan is
+# promoted into specs/NNN-*/plan.md deliberately, after a privacy read.
+.plans/
+.claude/settings.local.json

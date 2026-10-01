@@ -1,5 +1,29 @@
 # CLAUDE.md — Live captions for multilingual events
 
+## How work is specified — read this first
+
+This file is the **constitution**: what must always be true. Everything else is
+specified in [`specs/`](specs/README.md), one numbered directory per piece of
+work, versioned with the code. Read `specs/README.md` at the start of a session
+to see what exists, what is in progress, and why.
+
+1. **No code without a spec.** Every change belongs to a spec in `specs/`. If none
+   fits, write one first — a `proposed` spec can be a single paragraph.
+2. **Cite the number.** Branches are named `NNN-short-name`; commit subjects start
+   with `[NNN]`.
+3. **Plans are drafts, specs are records.** Plan mode writes to `.plans/`
+   (gitignored). Once approved, promote the plan into `specs/NNN-*/plan.md` by
+   hand, after checking it contains nothing private.
+4. **Tick tasks as you commit.** `tasks.md` is the progress record. Update it in
+   the same commit as the work.
+5. **Record decisions where they are made** — chosen, rejected, why — in the
+   spec's Decisions table. Never only in chat or a commit message.
+6. **Amend this file only through a spec.** A spec that conflicts with a rule here
+   says so in its "Constitution check" and proposes the amendment.
+7. **Nothing private in this repo.** No real names from an event, no transcript
+   content, no client pricing or negotiation. Business material lives in the
+   private business repository under the same spec number.
+
 ## Where this project is
 
 **The wedding happened on 6 September 2026 and the system worked.** 4.5 hours
@@ -174,8 +198,9 @@ without the operator. Tested by `scripts/test_reconnect.py`.
 
 ## Still out of scope
 
-No QR-code onboarding. No local router. No TTS. No local Whisper. No language
-detection. No diarization. No auth. No Docker. No database. No test suite beyond
+No QR-code onboarding. No local router. No TTS. No local Whisper (evaluation is
+spec 005). No language detection (conference mode, spec 003, proposes a scoped
+amendment). No diarization. No auth. No Docker. No database. No test suite beyond
 the scripts in `scripts/`.
 
 If you find yourself building any of the above, stop and ask.
