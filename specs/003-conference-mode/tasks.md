@@ -8,6 +8,7 @@
 
 ## Phase 1 — LID spike
 - [ ] Obtain 3–4 recordings of past bilingual panels
+- [ ] Use 006's recorded talk and self-test fixture as the first LID test set
 - [ ] Cut fixtures with `make_fixture.py`
 - [ ] `scripts/eval_lid.py`: replay with two-candidate continuous LID
 - [ ] Measure switch recovery and per-language error; francophone review

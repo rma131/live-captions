@@ -64,3 +64,4 @@ there are the two halves of one piece of work.
 | 003 | [Conference mode](003-conference-mode/spec.md) | draft | — |
 | 004 | [Phones as microphones](004-phone-mics/spec.md) | proposed | — |
 | 005 | [Local model evaluation](005-local-model-eval/spec.md) | proposed | — |
+| 006 | [Bilingual demo talk](006-bilingual-demo-talk/spec.md) | **accepted** | `006-bilingual-demo-talk` |

@@ -60,7 +60,13 @@ Source language is therefore never guessed. It is known by two independent means
 1. **Per-microphone routing (primary).** Each mic is assigned a language.
 2. **Operator override (secondary).** Hotkeys force the source language.
 
-Do not add language detection. Do not "improve" this with a detection fallback.
+Do not add language detection to the per-microphone mode. Do not "improve" it
+with a detection fallback.
+
+**Amended by spec 006:** in single-feed mode (`MODE=single`), continuous detection
+is allowed with **exactly two** candidate languages, and **only** with the operator
+override available (`1`/`2` force a language, `0` returns to automatic). The
+Turkish failure is why the per-microphone mode keeps the original rule.
 
 ## Hardware
 
@@ -199,8 +205,8 @@ without the operator. Tested by `scripts/test_reconnect.py`.
 ## Still out of scope
 
 No QR-code onboarding. No local router. No TTS. No local Whisper (evaluation is
-spec 005). No language detection (conference mode, spec 003, proposes a scoped
-amendment). No diarization. No auth. No Docker. No database. No test suite beyond
+spec 005). No language detection outside single-feed mode (see the amendment above; 003
+will test it on panels). No diarization. No auth. No Docker. No database. No test suite beyond
 the scripts in `scripts/`.
 
 If you find yourself building any of the above, stop and ask.
