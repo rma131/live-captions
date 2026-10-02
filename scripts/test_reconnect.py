@@ -34,29 +34,29 @@ def main() -> int:
     pipe.start()
     time.sleep(4)
     assert all(c.alive for c in pipe.channels), states(pipe)
-    print(f"PASS  three sessions up: {states(pipe)}")
+    print(f"PASS  every session up: {states(pipe)}")
 
     ids = {c.label: id(c.recognizer) for c in pipe.channels}
 
     # Simulate exactly what a dropped uplink does: the SDK cancels the session.
-    print("\n--- killing all three sessions ---")
+    print("\n--- killing every session ---")
     for c in pipe.channels:
         c.mark_down("simulated uplink drop")
     assert not any(c.alive for c in pipe.channels)
-    print(f"PASS  all three marked down: {states(pipe)}")
+    print(f"PASS  all marked down: {states(pipe)}")
 
     # audio must keep flowing without raising while sessions are dead
-    block = (np.random.default_rng(0).normal(0, 0.05, (C.BLOCK, 3))).astype(np.float32)
+    block = (np.random.default_rng(0).normal(0, 0.05, (C.BLOCK, C.NCHAN))).astype(np.float32)
     for _ in range(5):
         pipe.process(block, time.monotonic())
     print("PASS  audio path keeps running while sessions are down")
 
     if not wait_until(lambda: all(c.alive for c in pipe.channels), 45, "recovery"):
         return 1
-    print(f"PASS  all three recovered unaided: {states(pipe)}")
+    print(f"PASS  all recovered unaided: {states(pipe)}")
 
     rebuilt = [c.label for c in pipe.channels if id(c.recognizer) != ids[c.label]]
-    assert len(rebuilt) == 3, rebuilt
+    assert len(rebuilt) == len(pipe.channels), rebuilt
     print(f"PASS  recognizers actually rebuilt, not reused: {rebuilt}")
 
     # backoff must reset after a healthy reconnect, or the next outage waits longer

@@ -47,6 +47,29 @@ Interim results update only the speaker's own column. Translations settle once,
 when the sentence finishes — Turkish puts the verb and its negation last, so a
 partial Turkish sentence can translate to the opposite of the finished one.
 
+## One speaker, two languages — `MODE=single`
+
+For a talk or demo by one speaker who moves between English and French: one
+microphone (a headset, if their hands are busy), no gate, and the source
+language detected continuously between exactly two candidates. The operator can
+always overrule it — `1` / `2` force a language, `0` returns to automatic — and
+`W` marks the last caption as wrong in the log, which turns the transcript into
+labelled data for the review.
+
+Detection is allowed only here. The per-microphone mode keeps the original rule,
+because detection failed on Turkish ([spec 006](specs/006-bilingual-demo-talk/spec.md)).
+
+**Captions under the speaker's own screen.** `/band` is a caption strip for an
+OBS browser source: their laptop goes through a capture card into OBS, their
+content is scaled to ~85% of the height, and the band sits in the space below —
+never over what they are demonstrating. Options: `?fs=34&lines=2&bg=black&light=1`.
+Keep a direct HDMI cable ready as a fallback; our laptop is now in their video
+path.
+
+`RECORD_AUDIO=1` writes the captured feed as a WAV on the transcript's clock —
+already in `replay.py`'s format — so a recorded talk is a regression fixture.
+Only with the speaker's consent.
+
 ## Interpretation rounds
 
 The event uses live human interpreters, not machine translation alone: a speech
@@ -168,12 +191,15 @@ to talk into a microphone.
 ## Tests
 
 ```bash
-for t in mute rounds corrections script_match reconnect guest; do
+for t in mute rounds corrections script_match reconnect guest single; do
   uv run python scripts/test_$t.py
 done
 ```
 
-`test_reconnect.py` kills live Azure sessions and proves they come back.
+`test_reconnect.py` kills live Azure sessions and proves they come back; run it
+with `MODE=single` too. `test_single.py` replays a synthetic English/Québec
+French fixture (`make_tts_fixture.py` builds it — a test tool, not a product
+feature) and checks each sentence lands in its own column.
 `test_guest.py` checks the guest split over a real LAN address, because that is
 the only way `request.client.host` is anything but `127.0.0.1` — a mock would
 pass while the real thing let a phone mute the room.

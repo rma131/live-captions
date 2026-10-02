@@ -34,12 +34,26 @@ def main() -> int:
         print(f"no transcript found in {TRANSCRIPT_DIR}/")
         return 1
 
-    rows = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    every = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    # Since spec 006 the transcript also carries event rows — overrides, flags,
+    # audience counts, recording start — marked with an "event" key. Captions are
+    # the rows without one.
+    rows = [r for r in every if "event" not in r]
+    events = [r for r in every if "event" in r]
     if not rows:
         print(f"{path} is empty")
         return 1
 
     print(f"=== {path} — {len(rows)} finalised lines ===\n")
+    if events:
+        kinds = {}
+        for e in events:
+            kinds[e["event"]] = kinds.get(e["event"], 0) + 1
+        print("events: " + ", ".join(f"{k} {n}" for k, n in sorted(kinds.items())))
+        peak = max((e.get("peak_guests", 0) for e in events if e["event"] == "audience"), default=None)
+        if peak is not None:
+            print(f"peak guest screens connected: {peak}")
+        print()
 
     if full:
         for r in rows:

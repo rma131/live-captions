@@ -68,7 +68,10 @@
 <script>
 // Read-only. This page connects to /ws/guest, which never reads what we send,
 // so there is deliberately no way to mute or change anything from here.
-const CH2LANG = { EN:'en', TR:'tr', ES:'es' };
+// Languages come from the server (status.columns); the chips above are the
+// wedding default until the first status arrives.
+let CH2LANG = { EN:'en', TR:'tr', ES:'es' };
+let LANGS = ['es','en','tr'];
 const MAXLINES = 6;
 const linesEl = document.getElementById('lines');
 const idleEl  = document.getElementById('idle');
@@ -76,7 +79,7 @@ const dot     = document.getElementById('dot');
 
 let lang = 'en', current = null, muted = false;
 try { lang = localStorage.getItem('guestlang') || navigator.language.slice(0,2); } catch (_) {}
-if (!['es','en','tr'].includes(lang)) lang = 'en';
+if (!LANGS.includes(lang)) lang = 'en';
 
 function paintChips() {
   document.querySelectorAll('.chip').forEach(c =>
@@ -85,15 +88,35 @@ function paintChips() {
   // the chips are each labelled in their own, and casing rules are per-element.
   linesEl.lang = lang;
 }
-document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
-  lang = c.dataset.lang;
+function choose(l) {
+  lang = l;
   try { localStorage.setItem('guestlang', lang); } catch (_) {}
   paintChips();
   // Switching language does not replay history — start clean rather than show
   // a column of text in the language they just turned off.
   linesEl.textContent = ''; current = null; showIdle();
-}));
+}
+document.querySelectorAll('.chip').forEach(c =>
+  c.addEventListener('click', () => choose(c.dataset.lang)));
 paintChips();
+
+function buildChips(cols) {
+  const langs = cols.map(c => c.lang);
+  if (langs.join() === LANGS.join()) return;
+  LANGS = langs;
+  CH2LANG = Object.fromEntries(cols.map(c => [c.ch, c.lang]));
+  const header = document.querySelector('header');
+  header.querySelectorAll('.chip').forEach(c => c.remove());
+  for (const c of cols) {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.dataset.lang = c.lang; b.lang = c.lang;
+    b.textContent = c.name;            // each chip labelled in its own language
+    b.addEventListener('click', () => choose(c.lang));
+    header.appendChild(b);
+  }
+  if (!LANGS.includes(lang)) lang = LANGS.includes('en') ? 'en' : LANGS[0];
+  paintChips();
+}
 
 function showIdle() {
   idleEl.classList.toggle('hide', linesEl.childElementCount > 0);
@@ -132,6 +155,7 @@ function connect() {
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
     if (m.type === 'status') {
+      if (m.columns) buildChips(m.columns);
       muted = !!m.muted;
       if (muted) { linesEl.textContent = ''; current = null; }
       showIdle();

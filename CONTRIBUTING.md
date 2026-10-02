@@ -38,9 +38,10 @@ diarization, authentication, Docker, a database.
 There is no CI. Run this:
 
 ```bash
-for t in mute rounds corrections script_match reconnect guest; do
+for t in mute rounds corrections script_match reconnect guest single; do
   uv run python scripts/test_$t.py || echo "FAILED: $t"
 done
+MODE=single uv run python scripts/test_reconnect.py
 uv run python scripts/replay.py fixtures/gate_test.wav
 ```
 
