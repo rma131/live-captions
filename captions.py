@@ -60,11 +60,41 @@ PORT = int(os.getenv("PORT", "8000"))
 BIND_HOST = os.getenv("BIND_HOST", "127.0.0.1")
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
+# Two modes, behind the two seams spec 003 named and spec 006 built: where the
+# audio comes from, and how its language is decided.
+#
+#   MODE=mics    (default) — the wedding. One microphone per language, a FIXED
+#                source language per mic, an energy gate choosing between them.
+#   MODE=single  — one microphone, one speaker who may switch between exactly two
+#                languages (LANGS). The language is detected continuously, and the
+#                operator can always force it: 1 / 2 force LANGS[0] / LANGS[1],
+#                0 returns to automatic. No gate: with one channel it could only
+#                cut quiet speech. Detection is allowed ONLY here, by amendment in
+#                spec 006 — the per-microphone mode keeps the original rule,
+#                because detection failed on Turkish.
+MODE = os.getenv("MODE", "mics").lower()
+SINGLE = MODE == "single"
+LANGS = [l.strip() for l in os.getenv("LANGS", "en-US,fr-FR").split(",") if l.strip()]
+if SINGLE and len(LANGS) != 2:
+    sys.exit(f"MODE=single needs exactly two LANGS, got {LANGS}")
+# Opt-in. Records the captured feed, on the transcript's clock, so the event can
+# be replayed through any later setup. Only with the speaker's consent.
+RECORD_AUDIO = os.getenv("RECORD_AUDIO", "0").lower() in ("1", "on", "yes", "true")
+RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", "recordings")
+
 DEVICE_RATE = 48000
 AZURE_RATE = 16000
 DECIM = DEVICE_RATE // AZURE_RATE
 BLOCK = 4800  # 100 ms at 48 kHz
-NCHAN = 3
+NCHAN = 1 if SINGLE else 3
+
+# What each language is called on screen, and the word under the speaking column.
+LANG_META = {
+    "es": ("Español", "hablando"),
+    "en": ("English", "speaking"),
+    "tr": ("Türkçe", "konuşuyor"),
+    "fr": ("Français", "parle"),
+}
 
 # Once a channel wins it keeps winning for this long after dropping below the
 # threshold. Without it, natural pauses mid-sentence hand the stream to a
@@ -78,6 +108,16 @@ CHANNELS = [
     ("EN", os.getenv("CH2_LANG", "en-US"), ["es", "tr"]),
     ("TR", os.getenv("CH3_LANG", "tr-TR"), ["es", "en"]),
 ]
+# Screen columns, left to right. The pages build themselves from this list, so
+# the same HTML serves both modes. Wedding order: Español · English · Türkçe.
+COLUMNS = ["es", "en", "tr"]
+
+if SINGLE:
+    # One channel whose source is decided per utterance; its label names the mic,
+    # not a language. Targets are both languages — Azure returns the translation
+    # into whichever one was not spoken.
+    CHANNELS = [("MIC", None, [l[:2] for l in LANGS])]
+    COLUMNS = [l[:2] for l in LANGS]
 
 # Which USB channel each mic actually arrives on, 1-based, as shown by
 # scripts/meters.py. On this L-8, USB 1-2 are the STEREO MASTER MIX and the
@@ -87,7 +127,7 @@ USB_CHANNELS = [
     int(os.getenv("CH1_USB", "3")),
     int(os.getenv("CH2_USB", "4")),
     int(os.getenv("CH3_USB", "5")),
-]
+][:NCHAN]
 MAX_USB = max(USB_CHANNELS)
 
 SILENCE = np.zeros(BLOCK, dtype=np.float32)
@@ -118,13 +158,22 @@ class State:
         self.muted = False
         self.override: int | None = None   # 0-based channel index
         self.active: int | None = None
-        self.rms: list[float] = [0.0, 0.0, 0.0]
+        self.rms: list[float] = [0.0] * NCHAN
         # The language a speech is being delivered in this round, 0-based, or
         # None for free-for-all. In a round, the other two microphones carry
         # HUMAN interpreters, so what they say is never machine-translated
         # again — re-translating an interpretation back into the language it
         # came from produces round-trip nonsense on top of the original.
         self.primary: int | None = None
+        # Single-feed mode only. None = detect automatically; otherwise the full
+        # language code the operator forced, e.g. "fr-FR".
+        self.forced: str | None = None
+        # What was last spoken and when it last changed: logged per caption, so
+        # the review can measure how captions behave right after a switch.
+        self.last_lang: str | None = None
+        self.last_switch: float | None = None
+        self.last_final: dict | None = None   # for the operator's W flag
+        self.flags = 0
 
     def order(self) -> list[str]:
         if self.primary is None:
@@ -140,6 +189,7 @@ class Broadcaster:
 
     def __init__(self) -> None:
         self.clients: set = set()
+        self.guests: set = set()     # the read-only subset: phones and /band
         self.loop: asyncio.AbstractEventLoop | None = None
 
     def send(self, msg: dict) -> None:
@@ -171,6 +221,13 @@ class Broadcaster:
             "levels": {CHANNELS[i][0]: round(v, 4) for i, v in enumerate(STATE.rms)},
             "order": ([primary] + STATE.order()) if primary else [],
             "clients": len(self.clients),
+            "guests": len(self.guests),
+            "mode": MODE,
+            "forced": STATE.forced[:2].upper() if STATE.forced else None,
+            "flags": STATE.flags,
+            "columns": [{"lang": c, "ch": c.upper(), "name": LANG_META.get(c, (c.upper(), ""))[0],
+                         "now": LANG_META.get(c, ("", ""))[1]} for c in COLUMNS],
+            "sessions": [c[0] for c in CHANNELS],
         }
 
     def push_status(self) -> None:
@@ -236,7 +293,43 @@ def nudge_gate(factor: float) -> dict:
     return BUS.status()
 
 
+def set_forced(lang: str | None) -> dict:
+    """Single-feed mode: force the source language, or return to detection.
+
+    Rebuilding the session is what makes the new language take effect, so this
+    asks the supervisor for an immediate restart — about a second of silence,
+    acceptable at the moment a speaker changes language.
+    """
+    STATE.forced = lang
+    LOG.write({"event": "override", "forced": lang})
+    print(f"*** language {'forced to ' + lang if lang else 'back to automatic detection'} ***")
+    if PIPELINE:
+        for c in PIPELINE.channels:
+            c.forced = lang
+        PIPELINE.reconnect_all()
+    BUS.push_status()
+    return BUS.status()
+
+
+def flag_last() -> dict:
+    """Operator says: the caption just shown was wrong. Logged with what it was,
+    so the review counts errors where they happened instead of from memory."""
+    STATE.flags += 1
+    LOG.write({"event": "flag", "n": STATE.flags, "last": STATE.last_final})
+    print(f"*** flagged #{STATE.flags}: {(STATE.last_final or {}).get('heard', '')[:60]} ***")
+    BUS.push_status()
+    return BUS.status()
+
+
 def set_primary(idx: int | None) -> dict:
+    # In single-feed mode the same keys mean something simpler: 1 and 2 force the
+    # first or second language, 0 returns to detection. One operator vocabulary.
+    if SINGLE:
+        if idx is None:
+            return set_forced(None)
+        if idx < len(LANGS):
+            return set_forced(LANGS[idx])
+        return BUS.status()
     STATE.primary = idx
     BUS.send({"type": "clear"})   # a new round starts on a clean screen
     BUS.push_status()
@@ -368,11 +461,23 @@ class Channel:
         self.want_restart = False
         self.retry_at = 0.0
         self.backoff = RETRY_BASE_S
+        self.forced: str | None = STATE.forced
+        self.last_lang: str | None = None
         self.build()
 
     def build(self) -> None:
         cfg = speechsdk.translation.SpeechTranslationConfig(subscription=KEY, region=REGION)
-        cfg.speech_recognition_language = self.source  # fixed. never detected.
+        auto = None
+        if not SINGLE:
+            cfg.speech_recognition_language = self.source  # fixed. never detected.
+        elif self.forced:
+            cfg.speech_recognition_language = self.forced  # the operator decided
+        else:
+            # Required by the SDK but ignored once detection is configured.
+            cfg.speech_recognition_language = LANGS[0]
+            cfg.set_property(speechsdk.PropertyId.SpeechServiceConnection_LanguageIdMode,
+                             "Continuous")
+            auto = speechsdk.languageconfig.AutoDetectSourceLanguageConfig(languages=LANGS)
         for t in self.targets:
             cfg.add_target_language(t)
 
@@ -380,9 +485,11 @@ class Channel:
             samples_per_second=AZURE_RATE, bits_per_sample=16, channels=1
         )
         self.push = speechsdk.audio.PushAudioInputStream(stream_format=fmt)
+        extra = {"auto_detect_source_language_config": auto} if auto else {}
         self.recognizer = speechsdk.translation.TranslationRecognizer(
             translation_config=cfg,
             audio_config=speechsdk.audio.AudioConfig(stream=self.push),
+            **extra,
         )
         if self.phrases:
             pl = speechsdk.PhraseListGrammar.from_recognizer(self.recognizer)
@@ -488,20 +595,41 @@ class Channel:
         """True when a round is running and this mic is not the original speaker."""
         return STATE.primary is not None and self.idx != STATE.primary
 
+    def _lang_of(self, result) -> str:
+        """Full language code this result was spoken in."""
+        if not SINGLE:
+            return self.source
+        if self.forced:
+            return self.forced
+        lang = None
+        try:
+            lang = speechsdk.AutoDetectSourceLanguageResult(result).language
+        except Exception:
+            pass
+        return lang or self.last_lang or LANGS[0]
+
+    def _route(self, lang: str) -> tuple[str, list[str]]:
+        """Screen label and target languages for a result in `lang`."""
+        if not SINGLE:
+            return self.label, self.targets
+        return lang[:2].upper(), [t for t in self.targets if t != lang[:2]]
+
     def _on_interim(self, evt) -> None:
         if not evt.result.text.strip():
             return
         text = self._fix(evt.result.text)
-        print(f"  [{self.label}] ~ {text}")
+        lang = self._lang_of(evt.result)
+        label, targets = self._route(lang)
+        print(f"  [{label}] ~ {text}")
         interp = self.is_interpreter()
         BUS.send({
-            "type": "caption", "final": False, "ch": self.label, "source": text,
+            "type": "caption", "final": False, "ch": label, "source": text,
             "interpreted": interp,
             # Translation columns stay put until the sentence is finished,
             # unless INTERIM_TRANSLATIONS is on. An interpreter is never
             # machine-translated: their words fill their own column only.
             "translations": (
-                {t: self._fix(evt.result.translations.get(t, "")) for t in self.targets}
+                {t: self._fix(evt.result.translations.get(t, "")) for t in targets}
                 if INTERIM_TRANSLATIONS and not interp else {}
             ),
         })
@@ -511,24 +639,37 @@ class Channel:
             return
         if not evt.result.text.strip():
             return
+        # In the wedding mode lang is the mic's fixed language and label/targets
+        # are the channel's own, so everything below behaves exactly as before.
+        lang = self._lang_of(evt.result)
+        label, targets = self._route(lang)
         text = self._fix(evt.result.text)
-        trans = {t: self._fix(evt.result.translations.get(t, "")) for t in self.targets}
+        trans = {t: self._fix(evt.result.translations.get(t, "")) for t in targets}
 
         # A prepared line beats the machine every time — it is the only
         # human-checked output in the system.
         raw_text = evt.result.text
-        raw_trans = {t: evt.result.translations.get(t, "") for t in self.targets}
-        hit = match_script(text, self.source, self.script)
+        raw_trans = {t: evt.result.translations.get(t, "") for t in targets}
+        hit = match_script(text, lang, self.script)
         if hit:
-            text = hit.get(self.source[:2], text)
-            trans = {t: hit.get(t, trans[t]) for t in self.targets}
-            print(f"  [{self.label}] (prepared line)")
+            text = hit.get(lang[:2], text)
+            trans = {t: hit.get(t, trans[t]) for t in targets}
+            print(f"  [{label}] (prepared line)")
+
+        # Language switches, for the review: how do captions behave right after
+        # the speaker changes language? Only meaningful in single-feed mode.
+        now = time.time()
+        switched = SINGLE and self.last_lang is not None and lang != self.last_lang
+        if SINGLE and (switched or STATE.last_switch is None):
+            STATE.last_switch = now
+        self.last_lang = lang
+        STATE.last_lang = lang
 
         # Logged whatever happens on screen, including while muted: the point of
         # the log is reviewing what went wrong, and muted lines are exactly the
         # ones that went wrong.
-        LOG.write({
-            "ch": self.label, "lang": self.source,
+        row = {
+            "ch": label, "lang": lang,
             "heard": text, "translations": trans,
             # what Azure produced before our corrections and prepared lines, so
             # the two can be compared afterwards
@@ -538,13 +679,23 @@ class Channel:
             "interpreted": self.is_interpreter(),
             "corrected": raw_text != text and not hit,
             "muted": STATE.muted,
-        })
-        print(f"  [{self.label}] = {text}")
-        for t in self.targets:
+        }
+        if SINGLE:
+            row.update({
+                "mode": MODE,
+                "detected": None if self.forced else lang,
+                "forced": self.forced,
+                "switched": switched,
+                "since_switch_s": round(now - STATE.last_switch, 2) if STATE.last_switch else None,
+            })
+        LOG.write(row)
+        STATE.last_final = {"clock": time.strftime("%H:%M:%S"), "ch": label, "heard": text}
+        print(f"  [{label}] = {text}")
+        for t in targets:
             print(f"       {t}: {trans[t]}")
         print()
         interp = self.is_interpreter()
-        BUS.send({"type": "caption", "final": True, "ch": self.label,
+        BUS.send({"type": "caption", "final": True, "ch": label,
                   "source": text, "interpreted": interp,
                   # A human interpretation replaces the machine draft in its own
                   # column and goes nowhere else.
@@ -592,7 +743,9 @@ class Pipeline:
         PIPELINE = self
         phrases, rules = load_glossary()
         script = load_speeches()
-        print(f"phrase list: {len(phrases)} entries -> all three recognizers")
+        print(f"mode: {MODE}" + (f"  languages: {' / '.join(LANGS)}, detected continuously"
+                                   if SINGLE else ""))
+        print(f"phrase list: {len(phrases)} entries -> every recognizer")
         print(f"corrections: {len(rules)} rules applied to output")
         print(f"interim translations: {'on' if INTERIM_TRANSLATIONS else 'off'}")
         print(f"prepared lines: {len(script)} (match >= {SCRIPT_MATCH})")
@@ -616,7 +769,11 @@ class Pipeline:
 
     def _supervise(self) -> None:
         """Rebuild dead sessions. Runs off the audio path and off the SDK
-        callback threads, so a slow reconnect never blocks capture."""
+        callback threads, so a slow reconnect never blocks capture.
+
+        Also logs, once a minute, the peak number of guest screens connected —
+        phones and the /band page. That is the audience-adoption number."""
+        peak, next_tick = 0, time.monotonic() + 60
         while self.running:
             now = time.monotonic()
             for c in self.channels:
@@ -624,6 +781,11 @@ class Pipeline:
                     due = c.want_restart and now >= c.retry_at
                 if due:
                     c.restart()
+            peak = max(peak, len(BUS.guests))
+            if now >= next_tick:
+                LOG.write({"event": "audience", "peak_guests": peak,
+                           "guests": len(BUS.guests)})
+                peak, next_tick = len(BUS.guests), now + 60
             time.sleep(0.25)
 
     def reconnect_all(self) -> None:
@@ -634,9 +796,15 @@ class Pipeline:
                 c.backoff = RETRY_BASE_S
 
     def process(self, block: np.ndarray, now: float) -> None:
-        """block: (frames, 3) float32 at 48 kHz."""
+        """block: (frames, NCHAN) float32 at 48 kHz."""
         rms = np.sqrt(np.mean(block * block, axis=0))
         STATE.rms = [float(v) for v in rms]
+        if SINGLE:
+            # One microphone: nothing to choose between, so no gate. Every block
+            # goes to the one recognizer, which hears its own pauses.
+            STATE.active = 0
+            self.channels[0].feed(np.ascontiguousarray(block[:, 0]))
+            return
         self.gate.override = STATE.override
         winner = self.gate.pick(rms, now)
         STATE.active = winner
@@ -677,6 +845,20 @@ def require_local(request):
 @app.get("/")
 def index():
     return FileResponse(os.path.join(WEB_DIR, "screen.html"))
+
+
+@app.get("/band")
+def band():
+    """Read-only caption strip for an OBS browser source, under the speaker's
+    content rather than over it. Connects through the guest socket."""
+    return FileResponse(os.path.join(WEB_DIR, "band.html"))
+
+
+@app.get("/flag")
+@app.post("/flag")
+def http_flag(request: Request):
+    """Operator: the caption just shown was wrong."""
+    return require_local(request) or JSONResponse(flag_last())
 
 
 @app.get("/guest")
@@ -756,6 +938,7 @@ async def ws_guest(ws: WebSocket):
     await ws.accept()
     BUS.loop = asyncio.get_running_loop()
     BUS.clients.add(ws)
+    BUS.guests.add(ws)
     await ws.send_text(json.dumps({**BUS.status(), "font_size": FONT_SIZE,
                                    "theme": THEME, "guest": True}))
     try:
@@ -765,6 +948,7 @@ async def ws_guest(ws: WebSocket):
         pass
     finally:
         BUS.clients.discard(ws)
+        BUS.guests.discard(ws)
 
 
 @app.websocket("/ws")
@@ -791,6 +975,8 @@ async def ws_endpoint(ws: WebSocket):
             elif kind == "primary":
                 ch = msg.get("ch")  # 0 = free-for-all, 1-3 = that mic is the speaker
                 set_primary(None if not ch else int(ch) - 1)
+            elif kind == "flag":
+                flag_last()
             elif kind == "reconnect":
                 print("*** operator requested reconnect of all sessions ***")
                 if PIPELINE:
@@ -843,6 +1029,40 @@ def find_device(min_channels: int = 3) -> int:
     return idx
 
 
+class Recorder:
+    """Opt-in recording of the captured feed (RECORD_AUDIO=1).
+
+    Written as 16-bit 48 kHz WAV with the mapped mic channels — the exact format
+    scripts/replay.py reads — so a recorded event IS a regression fixture. Its
+    start is logged in the transcript, which puts audio and captions on one
+    clock. Written from the main loop, never the audio callback.
+    """
+
+    def __init__(self) -> None:
+        import wave
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
+        self.path = os.path.join(RECORDINGS_DIR, os.path.basename(LOG.path).replace(".jsonl", ".wav"))
+        self.wav = wave.open(self.path, "wb")
+        self.wav.setnchannels(NCHAN)
+        self.wav.setsampwidth(2)
+        self.wav.setframerate(DEVICE_RATE)
+        LOG.write({"event": "recording", "path": self.path, "channels": NCHAN,
+                   "rate": DEVICE_RATE})
+        print(f"recording: {self.path}")
+
+    def write(self, block: np.ndarray) -> None:
+        try:
+            self.wav.writeframes((np.clip(block, -1.0, 1.0) * 32767.0).astype("<i2").tobytes())
+        except Exception as e:
+            print(f"recording write failed: {e}")   # never take the show down
+
+    def close(self) -> None:
+        try:
+            self.wav.close()
+        except Exception:
+            pass
+
+
 def main() -> int:
     import sounddevice as sd
 
@@ -859,11 +1079,13 @@ def main() -> int:
     def callback(indata, frames, time_info, status):
         if status:
             print(f"audio status: {status}", file=sys.stderr)
-        # Map USB channels down to the three mics before anything else sees it.
+        # Map USB channels down to the mics before anything else sees it.
         blocks.put((indata[:, [c - 1 for c in USB_CHANNELS]].copy(), time.monotonic()))
 
+    recorder = Recorder() if RECORD_AUDIO else None
     pipe.start()
-    print(f"gate threshold {GATE_THRESHOLD}. ctrl-c to stop.\n")
+    print(("single feed, no gate" if SINGLE else f"gate threshold {GATE_THRESHOLD}")
+          + ". ctrl-c to stop.\n")
     stream = sd.InputStream(
         device=device, channels=MAX_USB, samplerate=DEVICE_RATE,
         blocksize=BLOCK, dtype="float32", callback=callback,
@@ -872,11 +1094,15 @@ def main() -> int:
         with stream:
             while True:
                 block, now = blocks.get()
+                if recorder:
+                    recorder.write(block)
                 pipe.process(block, now)
     except KeyboardInterrupt:
         print("\nstopping")
     finally:
         pipe.stop()
+        if recorder:
+            recorder.close()
     return 0
 
 

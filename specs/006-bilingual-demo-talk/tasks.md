@@ -8,12 +8,12 @@
 
 ## Phase 2 — Build
 - [ ] Columns sent by the server; pages build from them (wedding looks identical)
-- [ ] Single-feed mode: one channel, gate bypassed, `replay.py` takes 1-channel fixtures
-- [ ] Continuous LID with two candidates; detected language selects the column
-- [ ] Operator override `1`/`2`/`0` and flag `W`, loopback-only
+- [x] Single-feed mode: one channel, gate bypassed, `replay.py` takes 1-channel fixtures
+- [x] Continuous LID with two candidates; detected language selects the column
+- [x] Operator override `1`/`2`/`0` and flag `W`, loopback-only (server side; keys on the page still to wire)
 - [ ] `/band` caption strip
-- [ ] Opt-in audio recording on the transcript's clock
-- [ ] JSONL fields: detected language, override, time since switch; peak connections per minute
+- [x] Opt-in audio recording on the transcript's clock
+- [x] JSONL fields: detected language, override, time since switch; peak connections per minute
 - [ ] `test_single.py`; `test_guest.py` extended; all tests green
 
 ## Phase 3 — Self-test
