@@ -1,0 +1,118 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Caption band</title>
+<style>
+  /* A caption strip for an OBS browser source, placed UNDER the speaker's
+     content, never over it — at a hands-on demo, the bottom of their screen is
+     often where the work is.
+
+     URL options, so the operator tunes it in OBS without editing files:
+       ?fs=34       font size in px            (default 34)
+       ?lines=2     lines kept per language    (default 2)
+       ?bg=black    solid background; default is transparent for OBS
+       ?light=1     dark text, for a light band
+  */
+  :root { --fs:34px; --fg:#fff; --dim:rgba(255,255,255,.55); --label:#c9a227;
+          --rule:rgba(255,255,255,.18); }
+  :root.light { --fg:#111; --dim:rgba(0,0,0,.5); --label:#8a6a10; --rule:rgba(0,0,0,.15); }
+  html, body { margin:0; height:100%; overflow:hidden; background:transparent; color:var(--fg);
+               font-family:-apple-system,system-ui,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+               cursor:none; }
+  #band { display:flex; height:100%; box-sizing:border-box; padding:.4em 1.2em; gap:1.4em; }
+  .col { flex:1 1 0; min-width:0; display:flex; flex-direction:column; justify-content:flex-end;
+         overflow:hidden; }
+  .col + .col { border-left:1px solid var(--rule); padding-left:1.4em; }
+  .lang { font-size:calc(var(--fs)*.38); font-weight:700; letter-spacing:.16em;
+          text-transform:uppercase; color:var(--dim); margin-bottom:.25em; flex:none; }
+  .col.active .lang { color:var(--label); }
+  .line { font-size:var(--fs); font-weight:600; line-height:1.25; margin:0;
+          overflow-wrap:break-word; text-shadow:0 1px 3px rgba(0,0,0,.6); }
+  :root.light .line { text-shadow:none; }
+  .line.interim { opacity:.6; }
+  .line.old { opacity:.45; }
+  /* Muted: the band shows nothing at all. */
+  body.muted #band { visibility:hidden; }
+</style>
+
+<div id="band"></div>
+
+<script>
+// Read-only. Connects to /ws/guest, which never reads what is sent to it.
+const q = new URLSearchParams(location.search);
+document.documentElement.style.setProperty('--fs', (+q.get('fs') || 34) + 'px');
+if (q.get('bg')) document.body.style.background = q.get('bg');
+if (q.get('light')) document.documentElement.classList.add('light');
+const MAXLINES = Math.max(1, Math.min(4, +q.get('lines') || 2));
+
+const band = document.getElementById('band');
+let COL = {}, CH2LANG = {}, key = '', current = null;
+
+function build(cols) {
+  const k = cols.map(c => c.lang).join(',');
+  if (k === key) return;
+  key = k; COL = {}; current = null;
+  CH2LANG = Object.fromEntries(cols.map(c => [c.ch, c.lang]));
+  band.textContent = '';
+  for (const c of cols) {
+    const col = document.createElement('div');
+    col.className = 'col'; col.lang = c.lang;
+    const label = document.createElement('div');
+    label.className = 'lang'; label.textContent = c.name;
+    col.appendChild(label);
+    band.appendChild(col);
+    COL[c.lang] = col;
+  }
+}
+
+function trim(col) {
+  const lines = [...col.querySelectorAll('.line')];
+  lines.slice(0, -MAXLINES).forEach(n => n.remove());
+  [...col.querySelectorAll('.line')].forEach((n, i, all) =>
+    n.classList.toggle('old', i < all.length - 1));
+}
+
+function show(texts, final, src) {
+  Object.entries(COL).forEach(([l, col]) => col.classList.toggle('active', l === src));
+  if (!current) current = {};
+  for (const [l, col] of Object.entries(COL)) {
+    const text = texts[l];
+    if (!text) continue;              // a translation arrives with the final
+    let el = current[l];
+    if (!el) {
+      el = document.createElement('p');
+      el.className = 'line';
+      col.appendChild(el);
+      current[l] = el;
+    }
+    el.textContent = text;
+    el.classList.toggle('interim', !final);
+    trim(col);
+  }
+  if (final) current = null;
+}
+
+function clearAll() {
+  Object.values(COL).forEach(col => col.querySelectorAll('.line').forEach(n => n.remove()));
+  current = null;
+}
+
+function connect() {
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/guest`);
+  ws.onclose = () => setTimeout(connect, 1500);   // captions stay meanwhile
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'status') {
+      if (m.columns) build(m.columns);
+      document.body.classList.toggle('muted', !!m.muted);
+      if (m.muted) clearAll();
+    } else if (m.type === 'clear') {
+      clearAll();
+    } else if (m.type === 'caption') {
+      const src = CH2LANG[m.ch];
+      if (!src) return;
+      show({ ...(m.translations || {}), [src]: m.source }, m.final, src);
+    }
+  };
+}
+connect();
+</script>

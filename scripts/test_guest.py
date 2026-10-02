@@ -77,9 +77,12 @@ async def main() -> int:
                         {"type": "reconnect"}):
             await g.send(json.dumps(hostile))
         await drain(g)
+        await g.send(json.dumps({"type": "flag"}))
+        await drain(g)
         assert C.STATE.muted is False, "a guest muted the screen"
         assert C.STATE.primary is None, "a guest changed the round"
-        print("PASS  guest socket ignores mute, rounds, gate and reconnect")
+        assert C.STATE.flags == 0, "a guest flagged a caption"
+        print("PASS  guest socket ignores mute, rounds, gate, flag and reconnect")
 
         # Mute still has to cover them, and it is enforced before fan-out.
         C.set_mute(True)
@@ -97,9 +100,13 @@ async def main() -> int:
         assert C.STATE.muted is False
         print(f"PASS  /mute refused from {lan_ip} (403)")
 
-        for path in ("/unmute", "/round/3", "/gate/up", "/reconnect"):
+        for path in ("/unmute", "/round/3", "/gate/up", "/reconnect", "/flag"):
             assert get(lan, path) == 403, f"{path} was reachable from the network"
-        print("PASS  round, gate, unmute and reconnect all refused from the network")
+        print("PASS  round, gate, unmute, reconnect and flag all refused from the network")
+
+        band = urllib.request.urlopen(lan + "/band", timeout=5)
+        assert band.status == 200
+        print("PASS  /band is readable from the network (it is read-only by construction)")
 
         try:
             async with websockets.connect(f"ws://{lan_ip}:{PORT}/ws") as ws:

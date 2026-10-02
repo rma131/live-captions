@@ -81,6 +81,9 @@ if SINGLE and len(LANGS) != 2:
 # be replayed through any later setup. Only with the speaker's consent.
 RECORD_AUDIO = os.getenv("RECORD_AUDIO", "0").lower() in ("1", "on", "yes", "true")
 RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", "recordings")
+# Artwork on the mute screen (web/fc-dark.svg, web/fc-white.svg). Opt-in: an
+# event's artwork must never appear at a different event.
+MUTE_LOGO = os.getenv("MUTE_LOGO", "0").lower() in ("1", "on", "yes", "true")
 
 DEVICE_RATE = 48000
 AZURE_RATE = 16000
@@ -228,6 +231,7 @@ class Broadcaster:
             "columns": [{"lang": c, "ch": c.upper(), "name": LANG_META.get(c, (c.upper(), ""))[0],
                          "now": LANG_META.get(c, ("", ""))[1]} for c in COLUMNS],
             "sessions": [c[0] for c in CHANNELS],
+            "mute_logo": MUTE_LOGO,
         }
 
     def push_status(self) -> None:
@@ -891,9 +895,13 @@ def http_gate(direction: str, request: Request):
 
 @app.get("/fc-{variant}.svg")
 def logo(variant: str):
-    """Optional monogram for the mute screen. Absent in the public repo — the
-    page falls back to the word MUTED."""
-    if variant not in ("dark", "white"):
+    """Optional artwork for the mute screen — OPT-IN with MUTE_LOGO=1.
+
+    It used to be served whenever the file existed. The files left over from the
+    wedding carry the couple's names, so at any other event pressing M would have
+    put them on a screen in front of strangers. Off unless asked for; the page
+    falls back to the word MUTED."""
+    if not MUTE_LOGO or variant not in ("dark", "white"):
         return JSONResponse({"detail": "no logo"}, status_code=404)
     path = os.path.join(WEB_DIR, f"fc-{variant}.svg")
     if not os.path.exists(path):

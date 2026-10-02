@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Wedding captions</title>
+<title>Live captions</title>
 <style>
   /* Dark by default; body.light is the bright-room variant. Every colour is a
      variable so the two themes stay in step. */
@@ -115,6 +115,11 @@
   #help h2 { color:#6a6a6a; font-size:14px; letter-spacing:.2em;
              text-transform:uppercase; font-weight:600; margin:1.4em 0 .6em; }
   #help h2:first-child { margin-top:0; }
+  /* Help shows the controls of the mode that is running. */
+  .single-only { display:none; }
+  body.single .single-only { display:table; }
+  body.single h2.single-only { display:block; }
+  body.single .mics-only { display:none; }
 </style>
 
 <div id="cols">
@@ -153,15 +158,22 @@
       <tr><td><kbd>+</kbd> <kbd>−</kbd></td><td>font size</td></tr>
       <tr><td><kbd>L</kbd></td><td>light / dark screen</td></tr>
     </table>
-    <h2>Interpretation round</h2>
-    <table>
+    <h2 class="single-only">Language — one microphone</h2>
+    <table class="single-only">
+      <tr><td><kbd>1</kbd></td><td>force the first language</td></tr>
+      <tr><td><kbd>2</kbd></td><td>force the second language</td></tr>
+      <tr><td><kbd>0</kbd></td><td>back to automatic detection</td></tr>
+      <tr><td><kbd>W</kbd></td><td>flag the last caption as wrong &middot; logged for the review</td></tr>
+    </table>
+    <h2 class="mics-only">Interpretation round</h2>
+    <table class="mics-only">
       <tr><td><kbd>1</kbd></td><td>Spanish is speaking &middot; interpreted EN then TR</td></tr>
       <tr><td><kbd>2</kbd></td><td>English is speaking &middot; interpreted TR then ES</td></tr>
       <tr><td><kbd>3</kbd></td><td>Turkish is speaking &middot; interpreted EN then ES</td></tr>
       <tr><td><kbd>0</kbd></td><td>free for all &middot; translate every channel</td></tr>
     </table>
-    <h2>Microphones</h2>
-    <table>
+    <h2 class="mics-only">Microphones</h2>
+    <table class="mics-only">
       <tr><td><kbd>[</kbd></td><td>gate down &middot; picks up a quieter speaker</td></tr>
       <tr><td><kbd>]</kbd></td><td>gate up &middot; rejects more bleed</td></tr>
       <tr><td><kbd>R</kbd></td><td>reconnect all speech sessions</td></tr>
@@ -176,27 +188,57 @@
 <div id="bar">
   <span id="conn">connecting…</span>
   <span>mic <b id="active">—</b></span>
-  <span id="ovr" hidden>override <b id="ovrch"></b></span>
+  <span id="ovr" hidden><span id="ovrlbl">override</span> <b id="ovrch"></b></span>
+  <span id="flags" hidden></span>
   <span id="sess">EN · TR · ES</span>
 </div>
 
 <script>
 let MAXLINES = 3;          // more scrollback in a round, so interpreters can
                            // still read what was said before their turn
-const CH2LANG = { EN:'en', TR:'tr', ES:'es' };
-const COL = {};                       // lang -> {col, body}
-document.querySelectorAll('.col').forEach(c => {
-  COL[c.dataset.lang] = { col: c, body: c.querySelector('.body') };
-});
+// Columns come from the server (status.columns), so one page serves the wedding
+// (ES · EN · TR) and single-feed mode (EN · FR). The markup above is the
+// wedding default and what shows until the first status arrives.
+let CH2LANG = { EN:'en', TR:'tr', ES:'es' };
+let COL = {};                         // lang -> {col, body}
+function indexColumns() {
+  COL = {};
+  document.querySelectorAll('.col').forEach(c => {
+    COL[c.dataset.lang] = { col: c, body: c.querySelector('.body') };
+  });
+}
+indexColumns();
+let colKey = 'es,en,tr';
+function buildColumns(cols) {
+  const key = cols.map(c => c.lang).join(',');
+  if (key === colKey) return;           // unchanged: keep what is on screen
+  colKey = key;
+  CH2LANG = Object.fromEntries(cols.map(c => [c.ch, c.lang]));
+  // Text is set through textContent below, never interpolated as HTML.
+  const wrap = document.getElementById('cols');
+  wrap.textContent = '';
+  for (const c of cols) {
+    const col = document.createElement('div');
+    col.className = 'col'; col.dataset.lang = c.lang; col.lang = c.lang;
+    col.innerHTML = '<div class="head"><div class="lang"></div><div class="rule"></div>' +
+                    '<div class="now"></div><div class="step"></div></div><div class="body"></div>';
+    col.querySelector('.lang').textContent = c.name;
+    col.querySelector('.now').textContent = c.now;
+    wrap.appendChild(col);
+  }
+  indexColumns();
+  current = null;
+}
 
 let ws, fontSize = 44, current = null, themeChosen = false;   // current = the interim line in each column
-const sessions = { EN:'up', TR:'up', ES:'up' };
+let SESS = ['EN','TR','ES'];          // session labels, from status.sessions
+const sessions = {};
 
 // Per-session health in the corner. Captions stay on screen throughout: a
 // reconnecting session must never blank what the room is already reading.
 function renderSessions() {
   const el = document.getElementById('sess');
-  el.innerHTML = ['EN','TR','ES'].map(ch => {
+  el.innerHTML = SESS.map(ch => {
     const st = sessions[ch] || 'up';
     const colour = st === 'up' ? '#7a7a7a' : (st === 'retrying' ? '#c8801e' : '#a33');
     const mark = st === 'up' ? '·' : (st === 'retrying' ? '↻' : '×');
@@ -211,9 +253,17 @@ const mutedWord = document.querySelector('#muted span');
 mutedImg.addEventListener('load',  () => { mutedImg.hidden = false; mutedWord.hidden = true; });
 mutedImg.addEventListener('error', () => { mutedImg.hidden = true;  mutedWord.hidden = false; });
 
+// Mute-screen artwork is requested ONLY when the server says MUTE_LOGO is on.
+// A 404 from the server is not enough on its own: a browser that cached one
+// event's artwork would keep showing it at the next.
+let LOGO = false;
+function setLogo(light) {
+  if (LOGO) { mutedImg.src = light ? '/fc-white.svg' : '/fc-dark.svg'; return; }
+  mutedImg.removeAttribute('src'); mutedImg.hidden = true; mutedWord.hidden = false;
+}
 function setTheme(light, save) {
   document.body.classList.toggle('light', light);
-  mutedImg.src = light ? '/fc-white.svg' : '/fc-dark.svg';
+  setLogo(light);
   if (save) { try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (_) {} }
 }
 
@@ -256,7 +306,7 @@ function render(texts, final, srcLang) {
   // Every column gets its line as soon as the utterance starts, even the ones
   // whose translation has not arrived. That way the older captions scroll up
   // once, at the beginning, instead of jumping when the translation lands.
-  for (const lang of ['es', 'en', 'tr']) {
+  for (const lang of Object.keys(COL)) {
     const slot = COL[lang]; if (!slot) continue;
     const text = texts[lang];
     let el = current[lang];
@@ -316,10 +366,23 @@ function connect() {
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
     if (m.type === 'status') {
+      if (m.mute_logo !== undefined && !!m.mute_logo !== LOGO) {
+        LOGO = !!m.mute_logo; setLogo(document.body.classList.contains('light'));
+      }
+      if (m.columns) buildColumns(m.columns);
+      if (m.sessions) { SESS = m.sessions; renderSessions(); }
+      const single = m.mode === 'single';
+      document.body.classList.toggle('single', single);
       document.body.classList.toggle('muted', m.muted);
       document.getElementById('active').textContent = m.active || '—';
-      document.getElementById('ovr').hidden = !m.override;
-      document.getElementById('ovrch').textContent = m.override || '';
+      // In single-feed mode the corner says whether the language is detected or
+      // forced, and how many captions the operator has flagged as wrong.
+      const forced = single ? (m.forced ? 'forced ' + m.forced : 'auto') : m.override;
+      document.getElementById('ovr').hidden = !forced;
+      document.getElementById('ovrch').textContent = forced || '';
+      document.getElementById('ovrlbl').textContent = single ? 'language' : 'override';
+      const fl = document.getElementById('flags');
+      fl.hidden = !m.flags; fl.textContent = m.flags ? `⚑ ${m.flags}` : '';
       applyRound(m.order || []);
       if (m.font_size) setFont(m.font_size);
       // .env sets the default; a local choice, once made, wins on this screen.
@@ -371,6 +434,7 @@ addEventListener('keydown', e => {
     case 'c': case 'C': send({ type:'clear' }); break;
     case '1': case '2': case '3': send({ type:'primary', ch:+e.key }); break;
     case '0': send({ type:'primary', ch:0 }); break;
+    case 'w': case 'W': send({ type:'flag' }); break;
     case '+': case '=': setFont(fontSize + 3); break;
     case '-': case '_': setFont(fontSize - 3); break;
     case 'r': case 'R': send({ type:'reconnect' }); break;

@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 fixtures/*.wav
+fixtures/*.json
 transcripts/
 
 # Wedding content — real names, speeches and recordings stay local.

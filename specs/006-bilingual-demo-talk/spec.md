@@ -74,6 +74,34 @@ with a second mode behind the two seams named in 003.
 | Video-path risk | Direct HDMI fallback cable, rehearsed | — | Our laptop is now in their video path |
 | Microphone | Headset; lavalier tested as alternative | Handheld | Hands are busy; a headset is closest to the mouth, away from tool noise |
 | Columns | Sent by the server in the first status message | Hard-coded per page | One set of pages serves both modes |
+| Testing without a speaker | Synthetic EN/fr-CA fixture via TTS (`make_tts_fixture.py`), test tool only | Wait for the self-test | Deterministic, available today; replaced by real speech in Phase 3 |
+| Mute-screen artwork | Opt-in (`MUTE_LOGO`), and the page asks for it only when told | Serve whatever file exists | The wedding couple's monogram appeared on the mute screen in single mode — see Findings |
+| Default languages for Montréal | `en-CA,fr-CA` in `.env.example` | `en-US,fr-FR` | Forced fr-CA kept English intelligible; fr-FR garbled it. Synthetic evidence only |
+
+## Findings so far
+
+**2026-10-02 — synthetic fixture, `test_single.py`** (TTS: en-US Jenny, fr-CA
+Sylvie; four alternating sentences):
+
+- **Finals: 4 of 4 in the right column**, each translated into the other
+  language, with both `en-US,fr-FR` and `en-CA,fr-CA`.
+- **Interims flicker at every switch.** The first half-second of French after
+  English appears as English gibberish (`megna jettie`) before flipping to
+  French; `ensuite` first showed as English. Finals were right; the speaker's own
+  column is briefly wrong. Candidate mitigation, not built: hold interims for a
+  moment after a detected switch. Decide on real speech.
+- **A wrong override is costly.** English forced to `fr-FR`: "Today I am *Bing*
+  to show you how to *shop and itel*". Forced to `fr-CA` the same sentence came
+  through intact — the Canadian French model tolerates English, as Montréal
+  speech requires. Synthetic evidence; confirm in Phase 3.
+- **Vocabulary matters.** *la pierre* (the sharpening stone) came out as the
+  name *Pierre*. The speaker's tool vocabulary belongs in the glossary.
+- **Privacy bug found and fixed.** On the mute screen the page showed the
+  wedding couple's monogram — the file was still on this machine (gitignored,
+  never public) and the page loaded it whenever it existed, from browser cache
+  even after the server stopped serving it. At a client's event, pressing M
+  would have put their names on screen. Artwork is now opt-in and requested only
+  when the server says so.
 
 ## Open questions — for the speaker
 1. Do you switch between English and French, and how — by section, by sentence?

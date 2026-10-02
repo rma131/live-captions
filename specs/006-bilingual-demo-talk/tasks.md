@@ -7,18 +7,21 @@
 - [ ] Send the open questions to the speaker; record answers in spec.md
 
 ## Phase 2 — Build
-- [ ] Columns sent by the server; pages build from them (wedding looks identical)
+- [x] Columns sent by the server; pages build from them (wedding looks identical)
 - [x] Single-feed mode: one channel, gate bypassed, `replay.py` takes 1-channel fixtures
 - [x] Continuous LID with two candidates; detected language selects the column
-- [x] Operator override `1`/`2`/`0` and flag `W`, loopback-only (server side; keys on the page still to wire)
-- [ ] `/band` caption strip
+- [x] Operator override `1`/`2`/`0` and flag `W`, loopback-only
+- [x] `/band` caption strip
 - [x] Opt-in audio recording on the transcript's clock
 - [x] JSONL fields: detected language, override, time since switch; peak connections per minute
-- [ ] `test_single.py`; `test_guest.py` extended; all tests green
+- [x] `test_single.py`; `test_guest.py` extended; all tests green
+
+- [x] Mute-screen artwork made opt-in (privacy bug found in visual check)
+- [x] Visual check: two-column projector, `/band` under a slide in an OBS-style layout, mute
 
 ## Phase 3 — Self-test
 - [ ] Record a bilingual fixture on the headset, switching mid-paragraph while handling tools
-- [ ] First LID measurement written into spec.md
+- [x] First LID measurement written into spec.md (synthetic; real speech still to come)
 
 ## Phase 4 — Rehearsal
 - [ ] Capture card + OBS path; full length; network drop; HDMI fallback swap
